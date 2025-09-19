@@ -1,32 +1,53 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS # Import the CORS extension
+# app.py
+from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
 import joblib
 import numpy as np
 
-# Iniciar la aplicación Flask
 app = Flask(__name__)
-CORS(app)  # This enables CORS for all routes in your app
+CORS(app)
 
-# Cargar el modelo KNN guardado
-knn_model = joblib.load('ModeloCN.joblib')
+# Cargar el modelo
+try:
+    knn_classifier = joblib.load('ModeloCN.joblib')
+    print("Modelo cargado exitosamente.")
+except Exception as e:
+    print(f"Error al cargar el modelo: {e}")
+    knn_classifier = None
 
 @app.route('/')
-def home():
-    return "Servidor del modelo KNN en ejecución."
+def index():
+    return render_template('index.html')
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    # Obtener los datos del cuerpo de la solicitud (Request Body)
-    data = request.json
-    
-    # Se espera que el JSON contenga una lista de 784 píxeles
-    pixels = np.array(data['pixels']).reshape(1, -1)
-    
-    # Realizar la predicción
-    prediction = knn_model.predict(pixels)
-    
-    # Devolver la predicción en formato JSON
-    return jsonify({'prediction': int(prediction[0])})
+    if knn_classifier is None:
+        return jsonify({'error': 'Modelo no disponible'}), 500
+
+    try:
+        data = request.get_json(force=True)
+        pixels = np.array(data['pixels']).reshape(1, -1)
+
+        # Realizar la predicción
+        prediction = knn_classifier.predict(pixels)[0]
+        
+        # Obtener las probabilidades de cada clase
+        probabilities = knn_classifier.predict_proba(pixels)[0]
+        
+        # Crear un array con las certezas
+        certainty = np.round(probabilities, 4).tolist()
+
+        # Reestructurar la matriz de píxeles a 28x28 para el frontend
+        image_matrix = np.round(np.array(data['pixels']).reshape(28, 28) * 255).astype(int).tolist()
+
+        return jsonify({
+            'prediction': int(prediction),
+            'certainty': certainty,
+            'image_matrix': image_matrix
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(debug=True)
